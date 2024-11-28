@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { query } from 'express';
 import bodyParser from 'body-parser';
 import pg from 'pg';
 import env from 'dotenv';
@@ -29,8 +29,9 @@ app.use(cors());
 app.get('/', (req, res) => {
   res.send('Server is ready');
 });
-
+//get products on home page
 app.get('/api/products', async (req, res) => {
+  console.log(query);
   try {
     const result = await db.query('SELECT * FROM products ORDER BY id ASC');
     const products = result.rows;
@@ -40,7 +41,54 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+//get products on shop page
+app.get('/api/shop/products', async (req, res) => {
+  const { sortType, page, limit } = req.query;
+  console.log({ sortType, page, limit });
+  let result = [];
+
+  try {
+    // const products = await db.query('SELECT * FROM products ORDER BY id DESC');
+
+    switch (sortType) {
+      case '1':
+        result = await db.query('SELECT * FROM products ORDER BY id ASC');
+        break;
+      case '2':
+        result = await db.query('SELECT * FROM products ORDER BY id ASC');
+        break;
+      case '3':
+        result = await db.query('SELECT * FROM products ORDER BY id DESC');
+        break;
+      case '4':
+        result = await db.query('SELECT * FROM products ORDER BY price ASC');
+        break;
+      case '5':
+        result = await db.query('SELECT * FROM products ORDER BY price DESC');
+        break;
+      default:
+        result = await db.query('SELECT * FROM products ORDER BY id ASC');
+        break;
+    }
+
+    const products = result.rows;
+    if (limit === '8') {
+      return res.json(products.slice(0, 8));
+    }
+    if (limit === '12') {
+      return res.json(products.slice(0, 12));
+    }
+    if (limit === 'all') {
+      return res.json(products.slice(0, products.length));
+    }
+  } catch (error) {
+    console.log(error);
+  }
+});
+
+//get user info route
 app.get('/api/user/info/:userId', async (req, res) => {
+  //check token
   const token = req.headers.authorization?.slice(7);
   if (!token) {
     return res.status(401).json({
@@ -53,9 +101,11 @@ app.get('/api/user/info/:userId', async (req, res) => {
   const hmac = crypto.createHmac('sha256', jwtSecret);
   const signature = hmac.update(tokenData).digest('base64url');
 
+  //compare token signature
   if (signature === tokenSignature) {
     const payload = JSON.parse(atob(encodePayload));
-    console.log(payload);
+
+    //passed compare -> get user info
     try {
       const result = await db.query('SELECT * FROM users WHERE id=$1', [
         payload.sub
@@ -77,11 +127,11 @@ app.get('/api/user/info/:userId', async (req, res) => {
     }
   }
 });
-
+//register route
 app.post('/api/register', async (req, res) => {
   const user = req.body;
   const { email, password } = user;
-
+  //check user existing
   try {
     const result = await db.query('SELECT * FROM users WHERE email = $1', [
       email
@@ -91,6 +141,7 @@ app.post('/api/register', async (req, res) => {
         .status(401)
         .json({ msg: 'User Already Exists. Try Logging In' });
     } else {
+      //hash password
       bcrypt.hash(password, saltRounds, async (error, hash) => {
         if (error) {
           console.log('Error hashing password:', error);
@@ -110,21 +161,25 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
+//login route
 app.post('/api/login', async (req, res) => {
   const email = req.body.email;
   const loginPassword = req.body.password;
+  //check user existing
   try {
     const checkResult = await db.query('SELECT * FROM users WHERE email = $1', [
       email
     ]);
 
     if (checkResult.rows.length > 0) {
+      //compare passwords
       const user = checkResult.rows[0];
       const storedPassword = user.password;
       bcrypt.compare(loginPassword, storedPassword, (error, result) => {
         if (!result) {
           return res.status(401).json({ msg: 'Password Does Not Match' });
         } else {
+          //loged in & create a token
           const header = {
             alg: 'HS256',
             typ: 'JWT'
@@ -140,10 +195,11 @@ app.post('/api/login', async (req, res) => {
 
           const tokenData = `${encodeHeader}.${encodePayload}`;
 
+          //create a token signature
           const hmac = crypto.createHmac('sha256', jwtSecret);
           const signature = hmac.update(tokenData).digest('base64url');
 
-          res.json({
+          return res.json({
             id: user.id,
             token: `${tokenData}.${signature}`
           });
