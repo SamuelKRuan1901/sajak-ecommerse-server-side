@@ -1,35 +1,12 @@
 import express, { query } from 'express';
 import bodyParser from 'body-parser';
-import pg from 'pg';
-import env from 'dotenv';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
-import crypto from 'crypto';
-import { base64url } from './helper.js';
+import { createToken, verifyToken } from './middleware/middleware.js';
+import { corsOption, db, port, saltRounds, jwtSecret } from './config.js';
 
-env.config();
 const app = express();
-const port = process.env.SERVER_PORT || 3000;
-const saltRounds = 10;
-const jwtSecret = process.env.JWT_SECRET;
-
-const db = new pg.Client({
-  user: process.env.PG_USER,
-  host: process.env.PG_HOST,
-  database: process.env.PG_DATABASE,
-  password: process.env.PG_PASSWORD,
-  port: process.env.PG_PORT
-});
 db.connect();
-
-const corsOption = {
-  origin: '*',
-  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-};
-
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(cors(corsOption));
@@ -95,83 +72,30 @@ app.get('/api/shop/products', async (req, res) => {
 
 //get user info route
 app.get('/api/user/info/:userId', async (req, res) => {
-  //check token
+  //verify token
   const token = req.headers.authorization?.slice(7);
-  if (!token) {
+  const verify = await verifyToken(token, db, jwtSecret);
+  if (verify.status === 401) {
     return res.status(401).json({
       message: 'Unauthorized'
     });
   }
-
-  const [encodeHeader, encodePayload, tokenSignature] = token.split('.');
-  const tokenData = `${encodeHeader}.${encodePayload}`;
-  const hmac = crypto.createHmac('sha256', jwtSecret);
-  const signature = hmac.update(tokenData).digest('base64url');
-
-  //compare token signature
-  if (signature === tokenSignature) {
-    const payload = JSON.parse(atob(encodePayload));
-
-    //passed compare -> get user info
-    try {
-      const result = await db.query('SELECT * FROM users WHERE id=$1', [
-        payload.sub
-      ]);
-      const user = result.rows[0];
-      if (!user) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      if (payload.exp < Date.now()) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      return res.json(user);
-    } catch (error) {
-      console.log(error);
-    }
-  }
+  return res.status(201).json(verify.user);
 });
 
 //get product list in cart
 app.get('/api/cart', async (req, res) => {
   //check token
   const token = req.headers.authorization?.slice(7);
-  if (!token) {
+  const verify = await verifyToken(token, db, jwtSecret);
+  if (verify.status === 401) {
     return res.status(401).json({
       message: 'Unauthorized'
     });
   }
-
-  const [encodeHeader, encodePayload, tokenSignature] = token.split('.');
-  const tokenData = `${encodeHeader}.${encodePayload}`;
-  const hmac = crypto.createHmac('sha256', jwtSecret);
-  const signature = hmac.update(tokenData).digest('base64url');
-
-  //compare token signature
-  if (signature === tokenSignature) {
-    const payload = JSON.parse(atob(encodePayload));
-
-    //passed compare -> get user info
-    try {
-      const result = await db.query('SELECT * FROM users WHERE id=$1', [
-        payload.sub
-      ]);
-      const user = result.rows[0];
-      if (!user) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      if (payload.exp < Date.now()) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      const cart = await db.query(
-        `
+  try {
+    const cart = await db.query(
+      `
         SELECT cart.cart_id,products.id, products.name, products.price, products.image1, cart.product_size, cart.user_id, users.username, users.email, users.phonenumber, users.address FROM products
         JOIN cart
         ON products.id = cart.product_id  
@@ -180,13 +104,12 @@ app.get('/api/cart', async (req, res) => {
         WHERE user_id=$1
         ORDER BY product_id ASC;
         `,
-        [payload.sub]
-      );
-      const data = cart.rows;
-      return res.status(201).json({ data });
-    } catch (error) {
-      console.log(error);
-    }
+      [verify.user.id]
+    );
+    const data = cart.rows;
+    return res.status(201).json({ data });
+  } catch (error) {
+    console.log(error);
   }
 });
 
@@ -194,39 +117,15 @@ app.get('/api/cart', async (req, res) => {
 app.get('/api/compare', async (req, res) => {
   //check token
   const token = req.headers.authorization?.slice(7);
-  if (!token) {
+  const verify = await verifyToken(token, db, jwtSecret);
+  if (verify.status === 401) {
     return res.status(401).json({
       message: 'Unauthorized'
     });
   }
-
-  const [encodeHeader, encodePayload, tokenSignature] = token.split('.');
-  const tokenData = `${encodeHeader}.${encodePayload}`;
-  const hmac = crypto.createHmac('sha256', jwtSecret);
-  const signature = hmac.update(tokenData).digest('base64url');
-
-  //compare token signature
-  if (signature === tokenSignature) {
-    const payload = JSON.parse(atob(encodePayload));
-
-    //passed compare -> get user info
-    try {
-      const result = await db.query('SELECT * FROM users WHERE id=$1', [
-        payload.sub
-      ]);
-      const user = result.rows[0];
-      if (!user) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      if (payload.exp < Date.now()) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      const cart = await db.query(
-        `
+  try {
+    const cart = await db.query(
+      `
         SELECT compare.compare_id,products.id, products.name, products.price, products.image1, compare.product_size FROM products
         JOIN compare
         ON products.id = compare.product_id  
@@ -235,13 +134,12 @@ app.get('/api/compare', async (req, res) => {
         WHERE user_id=$1
         ORDER BY product_id ASC
         `,
-        [payload.sub]
-      );
-      const data = cart.rows;
-      return res.status(201).json({ data });
-    } catch (error) {
-      console.log(error);
-    }
+      [verify.user.id]
+    );
+    const data = cart.rows;
+    return res.status(201).json({ data });
+  } catch (error) {
+    console.log(error);
   }
 });
 
@@ -249,39 +147,15 @@ app.get('/api/compare', async (req, res) => {
 app.get('/api/wishlist', async (req, res) => {
   //check token
   const token = req.headers.authorization?.slice(7);
-  if (!token) {
+  const verify = await verifyToken(token, db, jwtSecret);
+  if (verify.status === 401) {
     return res.status(401).json({
       message: 'Unauthorized'
     });
   }
-
-  const [encodeHeader, encodePayload, tokenSignature] = token.split('.');
-  const tokenData = `${encodeHeader}.${encodePayload}`;
-  const hmac = crypto.createHmac('sha256', jwtSecret);
-  const signature = hmac.update(tokenData).digest('base64url');
-
-  //compare token signature
-  if (signature === tokenSignature) {
-    const payload = JSON.parse(atob(encodePayload));
-
-    //passed compare -> get user info
-    try {
-      const result = await db.query('SELECT * FROM users WHERE id=$1', [
-        payload.sub
-      ]);
-      const user = result.rows[0];
-      if (!user) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      if (payload.exp < Date.now()) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      const cart = await db.query(
-        `
+  try {
+    const cart = await db.query(
+      `
         SELECT wishlist.wishlist_id,products.id, products.name, products.price, products.image1, wishlist.product_size FROM products
         JOIN wishlist
         ON products.id = wishlist.product_id  
@@ -290,13 +164,12 @@ app.get('/api/wishlist', async (req, res) => {
         WHERE user_id=$1
         ORDER BY product_id ASC
         `,
-        [payload.sub]
-      );
-      const data = cart.rows;
-      return res.status(201).json({ data });
-    } catch (error) {
-      console.log(error);
-    }
+      [verify.user.id]
+    );
+    const data = cart.rows;
+    return res.status(201).json({ data });
+  } catch (error) {
+    console.log(error);
   }
 });
 
@@ -353,29 +226,8 @@ app.post('/api/login', async (req, res) => {
           return res.status(401).json({ msg: 'Password Does Not Match' });
         } else {
           //loged in & create a token
-          const header = {
-            alg: 'HS256',
-            typ: 'JWT'
-          };
-
-          const payload = {
-            sub: user.id,
-            exp: Date.now() + 3600000
-          };
-
-          const encodeHeader = base64url(JSON.stringify(header));
-          const encodePayload = base64url(JSON.stringify(payload));
-
-          const tokenData = `${encodeHeader}.${encodePayload}`;
-
-          //create a token signature
-          const hmac = crypto.createHmac('sha256', jwtSecret);
-          const signature = hmac.update(tokenData).digest('base64url');
-
-          return res.json({
-            id: user.id,
-            token: `${tokenData}.${signature}`
-          });
+          const token = createToken(user, jwtSecret);
+          return res.json(token);
         }
       });
     } else {
@@ -390,46 +242,22 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/cart', async (req, res) => {
   //check token
   const token = req.headers.authorization?.slice(7);
-  if (!token) {
+  const verify = await verifyToken(token, db, jwtSecret);
+  if (verify.status === 401) {
     return res.status(401).json({
       message: 'Unauthorized'
     });
   }
+  try {
+    const data = req.body;
 
-  const [encodeHeader, encodePayload, tokenSignature] = token.split('.');
-  const tokenData = `${encodeHeader}.${encodePayload}`;
-  const hmac = crypto.createHmac('sha256', jwtSecret);
-  const signature = hmac.update(tokenData).digest('base64url');
-
-  //compare token signature
-  if (signature === tokenSignature) {
-    const payload = JSON.parse(atob(encodePayload));
-    try {
-      const result = await db.query('SELECT * FROM users WHERE id=$1', [
-        payload.sub
-      ]);
-      const user = result.rows[0];
-      if (!user) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      if (payload.exp < Date.now()) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-
-      const data = req.body;
-
-      await db.query(
-        'INSERT INTO cart(user_id, product_id, product_size, quantity) VALUES($1, $2, $3, $4)',
-        [user.id, data.productId, data.size, data.quantity]
-      );
-      return res.status(201).json({ msg: 'Add to cart successfully' });
-    } catch (error) {
-      console.log(error);
-    }
+    await db.query(
+      'INSERT INTO cart(user_id, product_id, product_size, quantity) VALUES($1, $2, $3, $4)',
+      [verify.user.id, data.productId, data.size, data.quantity]
+    );
+    return res.status(201).json({ msg: 'Add to cart successfully' });
+  } catch (error) {
+    console.log(error);
   }
 });
 
@@ -437,46 +265,22 @@ app.post('/api/cart', async (req, res) => {
 app.post('/api/compare', async (req, res) => {
   //check token
   const token = req.headers.authorization?.slice(7);
-  if (!token) {
+  const verify = await verifyToken(token, db, jwtSecret);
+  if (verify.status === 401) {
     return res.status(401).json({
       message: 'Unauthorized'
     });
   }
+  try {
+    const data = req.body;
 
-  const [encodeHeader, encodePayload, tokenSignature] = token.split('.');
-  const tokenData = `${encodeHeader}.${encodePayload}`;
-  const hmac = crypto.createHmac('sha256', jwtSecret);
-  const signature = hmac.update(tokenData).digest('base64url');
-
-  //compare token signature
-  if (signature === tokenSignature) {
-    const payload = JSON.parse(atob(encodePayload));
-    try {
-      const result = await db.query('SELECT * FROM users WHERE id=$1', [
-        payload.sub
-      ]);
-      const user = result.rows[0];
-      if (!user) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      if (payload.exp < Date.now()) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-
-      const data = req.body;
-
-      await db.query(
-        'INSERT INTO compare(user_id, product_id, product_size, quantity) VALUES($1, $2, $3, $4)',
-        [user.id, data.productId, data.size, data.quantity]
-      );
-      return res.status(201).json({ msg: 'Add to compare successfully' });
-    } catch (error) {
-      console.log(error);
-    }
+    await db.query(
+      'INSERT INTO compare(user_id, product_id, product_size, quantity) VALUES($1, $2, $3, $4)',
+      [verify.user.id, data.productId, data.size, data.quantity]
+    );
+    return res.status(201).json({ msg: 'Add to compare successfully' });
+  } catch (error) {
+    console.log(error);
   }
 });
 
@@ -484,46 +288,22 @@ app.post('/api/compare', async (req, res) => {
 app.post('/api/wishlist', async (req, res) => {
   //check token
   const token = req.headers.authorization?.slice(7);
-  if (!token) {
+  const verify = await verifyToken(token, db, jwtSecret);
+  if (verify.status === 401) {
     return res.status(401).json({
       message: 'Unauthorized'
     });
   }
+  try {
+    const data = req.body;
 
-  const [encodeHeader, encodePayload, tokenSignature] = token.split('.');
-  const tokenData = `${encodeHeader}.${encodePayload}`;
-  const hmac = crypto.createHmac('sha256', jwtSecret);
-  const signature = hmac.update(tokenData).digest('base64url');
-
-  //compare token signature
-  if (signature === tokenSignature) {
-    const payload = JSON.parse(atob(encodePayload));
-    try {
-      const result = await db.query('SELECT * FROM users WHERE id=$1', [
-        payload.sub
-      ]);
-      const user = result.rows[0];
-      if (!user) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      if (payload.exp < Date.now()) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-
-      const data = req.body;
-
-      await db.query(
-        'INSERT INTO wishlist(user_id, product_id, product_size, quantity) VALUES($1, $2, $3, $4)',
-        [user.id, data.productId, data.size, data.quantity]
-      );
-      return res.status(201).json({ msg: 'Add to wishlist successfully' });
-    } catch (error) {
-      console.log(error);
-    }
+    await db.query(
+      'INSERT INTO wishlist(user_id, product_id, product_size, quantity) VALUES($1, $2, $3, $4)',
+      [verify.user.id, data.productId, data.size, data.quantity]
+    );
+    return res.status(201).json({ msg: 'Add to wishlist successfully' });
+  } catch (error) {
+    console.log(error);
   }
 });
 
@@ -531,55 +311,31 @@ app.post('/api/wishlist', async (req, res) => {
 app.post('/api/wishlist/move_to_cart', async (req, res) => {
   //check token
   const token = req.headers.authorization?.slice(7);
-  if (!token) {
+  const verify = await verifyToken(token, db, jwtSecret);
+  if (verify.status === 401) {
     return res.status(401).json({
       message: 'Unauthorized'
     });
   }
-
-  const [encodeHeader, encodePayload, tokenSignature] = token.split('.');
-  const tokenData = `${encodeHeader}.${encodePayload}`;
-  const hmac = crypto.createHmac('sha256', jwtSecret);
-  const signature = hmac.update(tokenData).digest('base64url');
-
-  //compare token signature
-  if (signature === tokenSignature) {
-    const payload = JSON.parse(atob(encodePayload));
-    try {
-      const result = await db.query('SELECT * FROM users WHERE id=$1', [
-        payload.sub
-      ]);
-      const user = result.rows[0];
-      if (!user) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-      if (payload.exp < Date.now()) {
-        return res.status(401).json({
-          message: 'Unauthorized'
-        });
-      }
-
-      await db.query(
-        `INSERT INTO cart(user_id, product_id, product_size,quantity)
+  try {
+    await db.query(
+      `INSERT INTO cart(user_id, product_id, product_size,quantity)
           SELECT user_id, product_id, product_size,quantity
           FROM wishlist
           WHERE user_id = $1
           `,
-        [payload.sub]
-      );
+      [verify.user.id]
+    );
 
-      await db.query(
-        `DELETE FROM wishlist
+    await db.query(
+      `DELETE FROM wishlist
           WHERE user_id = $1
           `,
-        [payload.sub]
-      );
-      return res.status(201).json({ msg: 'Add to compare successfully' });
-    } catch (error) {
-      console.log(error);
-    }
+      [verify.user.id]
+    );
+    return res.status(201).json({ msg: 'Add to compare successfully' });
+  } catch (error) {
+    console.log(error);
   }
 });
 
