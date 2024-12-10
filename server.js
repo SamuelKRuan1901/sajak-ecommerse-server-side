@@ -1,9 +1,14 @@
-import express, { query } from 'express';
+import express from 'express';
 import bodyParser from 'body-parser';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
 import { createToken, verifyToken } from './middleware/middleware.js';
 import { corsOption, db, port, saltRounds, jwtSecret } from './config.js';
+import { getProducts } from './get/getProduct.js';
+import { getShopProducts } from './get/getShopProducts.js';
+import { getCart } from './get/getCart.js';
+import { getCompare } from './get/getCompare.js';
+import { getWishlist } from './get/getWishlist.js';
 
 const app = express();
 db.connect();
@@ -16,58 +21,14 @@ app.get('/', (req, res) => {
 });
 //get products on home page
 app.get('/api/products', async (req, res) => {
-  console.log(query);
-  try {
-    const result = await db.query('SELECT * FROM products ORDER BY id ASC');
-    const products = result.rows;
-    return res.json(products);
-  } catch (error) {
-    console.log(error);
-  }
+  const products = await getProducts(db);
+  return res.json(products);
 });
 
 //get products on shop page
 app.get('/api/shop/products', async (req, res) => {
-  const { sortType, page, limit } = req.query;
-  let result = [];
-
-  try {
-    // const products = await db.query('SELECT * FROM products ORDER BY id DESC');
-
-    switch (sortType) {
-      case '1':
-        result = await db.query('SELECT * FROM products ORDER BY id ASC');
-        break;
-      case '2':
-        result = await db.query('SELECT * FROM products ORDER BY id ASC');
-        break;
-      case '3':
-        result = await db.query('SELECT * FROM products ORDER BY id DESC');
-        break;
-      case '4':
-        result = await db.query('SELECT * FROM products ORDER BY price ASC');
-        break;
-      case '5':
-        result = await db.query('SELECT * FROM products ORDER BY price DESC');
-        break;
-      default:
-        result = await db.query('SELECT * FROM products ORDER BY id ASC');
-        break;
-    }
-
-    const products = result.rows;
-    if (limit === '8') {
-      return res.json(products.slice(0, 8));
-    }
-    if (limit === '12') {
-      return res.json(products.slice(0, 12));
-    }
-    if (limit === 'all') {
-      return res.json(products.slice(0, products.length));
-    }
-  } catch (error) {
-    console.log(error);
-  }
+  const products = await getShopProducts(req, db);
+  return res.json(products);
 });
 
 //get user info route
@@ -93,24 +54,9 @@ app.get('/api/cart', async (req, res) => {
       message: 'Unauthorized'
     });
   }
-  try {
-    const cart = await db.query(
-      `
-        SELECT cart.cart_id,products.id, products.name, products.price, products.image1, cart.product_size, cart.user_id, users.username, users.email, users.phonenumber, users.address FROM products
-        JOIN cart
-        ON products.id = cart.product_id  
-        JOIN users
-        ON users.id = cart.user_id
-        WHERE user_id=$1
-        ORDER BY product_id ASC;
-        `,
-      [verify.user.id]
-    );
-    const data = cart.rows;
-    return res.status(201).json({ data });
-  } catch (error) {
-    console.log(error);
-  }
+  const cart = await getCart(verify.user.id, db);
+  const data = cart.data;
+  return res.status(cart.status).json({ data });
 });
 
 //get product list in compare
@@ -123,24 +69,9 @@ app.get('/api/compare', async (req, res) => {
       message: 'Unauthorized'
     });
   }
-  try {
-    const cart = await db.query(
-      `
-        SELECT compare.compare_id,products.id, products.name, products.price, products.image1, compare.product_size FROM products
-        JOIN compare
-        ON products.id = compare.product_id  
-        JOIN users
-        ON users.id = compare.user_id
-        WHERE user_id=$1
-        ORDER BY product_id ASC
-        `,
-      [verify.user.id]
-    );
-    const data = cart.rows;
-    return res.status(201).json({ data });
-  } catch (error) {
-    console.log(error);
-  }
+  const compare = await getCompare(verify.user.id, db);
+  const data = compare.data;
+  return res.status(compare.status).json({ data });
 });
 
 //get product list in wishlist
@@ -153,30 +84,14 @@ app.get('/api/wishlist', async (req, res) => {
       message: 'Unauthorized'
     });
   }
-  try {
-    const cart = await db.query(
-      `
-        SELECT wishlist.wishlist_id,products.id, products.name, products.price, products.image1, wishlist.product_size FROM products
-        JOIN wishlist
-        ON products.id = wishlist.product_id  
-        JOIN users
-        ON users.id = wishlist.user_id
-        WHERE user_id=$1
-        ORDER BY product_id ASC
-        `,
-      [verify.user.id]
-    );
-    const data = cart.rows;
-    return res.status(201).json({ data });
-  } catch (error) {
-    console.log(error);
-  }
+  const wishlist = await getWishlist(verify.user.id, db);
+  const data = wishlist.data;
+  return res.status(wishlist.status).json({ data });
 });
 
 //register route
 app.post('/api/register', async (req, res) => {
-  const user = req.body;
-  const { email, password } = user;
+  const { email, password } = req.body;
   //check user existing
   try {
     const result = await db.query('SELECT * FROM users WHERE email = $1', [
