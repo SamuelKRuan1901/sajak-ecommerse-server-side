@@ -92,7 +92,8 @@ app.get('/api/wishlist', async (req, res) => {
 //register route
 app.post('/api/register', async (req, res) => {
   const { email, password } = req.body;
-  //check user existing
+
+  // check user existing
   try {
     const result = await db.query('SELECT * FROM users WHERE email = $1', [
       email
